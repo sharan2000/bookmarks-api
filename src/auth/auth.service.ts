@@ -1,25 +1,30 @@
+import { ConfigService } from '@nestjs/config';
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { AuthLoginDto, AuthSignupDto } from 'src/dto';
+import { AuthLoginDto, AuthSignupDto } from './dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 import * as argon2 from "argon2";
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable({})
 export class AuthService {
-  constructor(private prismaService: PrismaService) {}
+  constructor(
+    private prismaService: PrismaService,
+    private jwtService: JwtService,
+    private config: ConfigService
+  ) {}
 
   async login(dto: AuthLoginDto) {
     console.log('login dto in service -- ', dto)
-    let user, message
+    let access_token: string, message: string
     try {
       // check if user exists
-      user = await this.prismaService.user.findUnique({
+      const user = await this.prismaService.user.findUnique({
         select: {
           id: true,
           email: true,
           hash: true,
-          createdAt: true
         },
         where: {
           email: dto.email
@@ -38,8 +43,9 @@ export class AuthService {
         throw new ForbiddenException("Invalid credentials.")
       }
 
-      // if match return user object
-      delete user.hash
+      const jwtToken = await this.signToken(user.id, user.email)
+
+      access_token = 'BEARER ' + jwtToken
       message = "successfully logged in."
     } catch (error) {
       console.log('error in login function in service -- ', error)
@@ -50,7 +56,7 @@ export class AuthService {
 
     return {
       message,
-      user
+      access_token
     };
   }
 
@@ -93,5 +99,17 @@ export class AuthService {
       message,
       user
     };
+  }
+
+  signToken(userId: number, email: string):Promise<string> {
+    const payload = {
+      sub: userId,
+      email
+    }
+
+    return this.jwtService.signAsync(payload, {
+      expiresIn: '20m',
+      secret: this.config.get('JWT_SECRET')
+    })
   }
 }
